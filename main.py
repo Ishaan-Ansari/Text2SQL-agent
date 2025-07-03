@@ -1,128 +1,101 @@
 import traceback
-from typing import Optional
+from typing import Optional, List, Tuple, Dict, Any
+from contextlib import contextmanager
 import streamlit as st
 import os
-import os.path
+import sqlite3
+import re
+from print_manager import PrintManager
+pm = PrintManager()
 
 from llama_index.core.response.pprint_utils import pprint_response
 from llama_index.llms.openai import OpenAI
+from llama_index.core import Settings
 from llama_index.core.utilities.sql_wrapper import SQLDatabase
-from llama_index.core.service_context import ServiceContext
 from llama_index.core.query_engine import NLSQLTableQueryEngine
-
-from sqlalchemy import (
-    create_engine,
-    MetaData,
-    Table,
-    Column,
-    String,
-    Integer,
-    select,
-    text
+from llama_index.core.workflow import (
+    Event,
+    StartEvent,
+    StopEvent,
+    Workflow,
+    step,
 )
 
+from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 load_dotenv()
 
-
-@st.cache_resource
-def init_database_connection():
-    """initialize database connection"""
-    try:
-        required_vars = ['DB_USER', 'DB_PASSWORD', 'DB_HOST', 'DB_NAME']
-        missing_vars = [var for var in required_vars if not os.getenv(var)]
-
-        if missing_vars:
-            st.error(f"Missing .env variables: {', '.join(missing_vars)}")
-            return None, None, None
-
-        db_url = f"postgresql+psycopg2://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
-
-        # create engine with connection pooling
-        engine = create_engine(
-            db_url,
-            pool_pre_ping=True,
-            pool_recycle=300,
-            echo=False,
-        )
-
-        # Test connection
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-
-        # initialize LLM
-        llm = OpenAI(
-            temperature=0.1,
-            model="gpt-4-turbo"
-        )
-
-        # create service context
-        service_context = ServiceContext.from_defaults(llm=llm)
-
-        # initialize SQL database wrapper
-        sql_database = SQLDatabase(
-            engine,
-            include_tables=["product_master", "inventory"]
-        )
-
-        # create query engine
-        query_engine = NLSQLTableQueryEngine(
-            sql_database=sql_database,
-            tables=["product_master", "inventory"],
-            verbose=True
-        )
-
-        return engine, sql_database, query_engine
-
-    except Exception as e:
-        st.error(f"Failed to initialize database connection: {str(e)}")
-        return None, None, None
-
-@st.cache_data
-def get_table_info(_sql_database):
-    """Get table schema information for display"""
-    try:
-        table_info = {}
-        for table_name in ["product_master", "inventory"]:
-            table_info[table_name] = _sql_database.get_table_info(table_name)
-        return table_info
-    except Exception as e:
-        st.error(f"Failed to get table info: {str(e)}")
-        return {}
-
-def queryDB(query_str: str, query_engine) -> Optional[dict]:
-    """Query the databse with error handling"""
-    try:
-        if not query_str.strip():
-            return {"error": "Please enter a valid query"}
-        response = query_engine.query(query_str)
-        return {
-            "success": True,
-            "response": response.response,
-            "sql_query": getattr(response, 'metadata', {}).get('sql_query', 'N/A'),
-            "full_response": response
-        }
-
-    except Exception as e:
-        error_msg = f"Query failed: {str(e)}"
-        st.error(error_msg)
-        return {
-            "success": False,
-            "error": error_msg,
-            "traceback": traceback.format_exc()
-        }
-
-def display_chat_history():
-    """Display chat history"""
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.write(message["content"])
-
-            if message["role"] == "assistant" and "sql_query" in message:
-                with st.expander("Generated SQL Query"):
-                    st.code(message["sql_query"], language="sql")
+class IntentAnalysisEvent(Event):
+    intent: str
+    message: str
 
 
-def main():
-    pass
+class SQLGenerationEvent(Event):
+    sql_query: str
+
+
+class SQLExecutionEvent(Event):
+    execution_result: str
+    execution_time: float
+    row_count: int
+
+
+class FeedbackEvent(Event):
+    feedback: str
+    success: bool
+
+
+class IntentAnalyzer(Workflow):
+    def __init__(self):
+        super().__init__()
+        self.llm = OpenAI()
+        Settings.llm = self.llm
+
+        # Defined intent patterns
+        self.sql_patterns = [
+            r'(?i)(show|list|find|search|sort)',
+            r'(?i)(products|stock|price)',
+            r'(?i)(how many|total|average)',
+            r'(?i)(sql|query|database)',
+            r'(?i)(highest|lowest|maximum|minimum)',
+        ]
+
+        self.chat_patterns = [
+            r'(?i)(hello|hi|how are you)',
+            r'(?i)(chat|talk|conversation)',
+            r'(?i)(what are you doing|who are you)',
+            r'(?i)(thank you|thanks)',
+        ]
+
+async def analyze_intent(self, prompt: str)->tuple[str, str]:
+    """Analyze the purpose of the user's prompt"""
+    if any(re.search(pattern, prompt) for pattern in self.sql_patterns):
+        return "sql", "SQL query detected"
+    if any(re.search(pattern, prompt) for pattern in self.chat_patterns):
+        return "chat", "Chat intent detected"
+
+    # Detailed analysis with LLM
+    analysis_prompt = f"""
+    Please analyze the purpose of the following user message:
+    "{prompt}"
+    
+    There are only two options:
+    1. SQL: The user wants to perform a database query
+    2. CHAT: The user wants to chat
+    
+    Only write "SQL" or "CHAT".
+    """
+
+    response = await self.llm.acomplete(analysis_prompt)
+    intent = str(response).strip().upper()
+
+    if intent == "SQL":
+        return "sql", "LLM analysis, SQL query detected"
+    return "chat", "LLM analysis: chat intent detected"
+
+@step
+async def determine_intent(self, ev: StartEvent) -> StopEvent:
+    prompt = ev.topic
+    intent, message = await self.analyze_intent(prompt)
+
 
