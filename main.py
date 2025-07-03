@@ -1,3 +1,5 @@
+import traceback
+from typing import Optional
 import streamlit as st
 import os
 import os.path
@@ -21,6 +23,7 @@ from sqlalchemy import (
 
 from dotenv import load_dotenv
 load_dotenv()
+
 
 @st.cache_resource
 def init_database_connection():
@@ -50,7 +53,7 @@ def init_database_connection():
         # initialize LLM
         llm = OpenAI(
             temperature=0.1,
-            model="gpt-4-turbo-preview"
+            model="gpt-4-turbo"
         )
 
         # create service context
@@ -75,4 +78,51 @@ def init_database_connection():
         st.error(f"Failed to initialize database connection: {str(e)}")
         return None, None, None
 
+@st.cache_data
+def get_table_info(_sql_database):
+    """Get table schema information for display"""
+    try:
+        table_info = {}
+        for table_name in ["product_master", "inventory"]:
+            table_info[table_name] = _sql_database.get_table_info(table_name)
+        return table_info
+    except Exception as e:
+        st.error(f"Failed to get table info: {str(e)}")
+        return {}
+
+def queryDB(query_str: str, query_engine) -> Optional[dict]:
+    """Query the databse with error handling"""
+    try:
+        if not query_str.strip():
+            return {"error": "Please enter a valid query"}
+        response = query_engine.query(query_str)
+        return {
+            "success": True,
+            "response": response.response,
+            "sql_query": getattr(response, 'metadata', {}).get('sql_query', 'N/A'),
+            "full_response": response
+        }
+
+    except Exception as e:
+        error_msg = f"Query failed: {str(e)}"
+        st.error(error_msg)
+        return {
+            "success": False,
+            "error": error_msg,
+            "traceback": traceback.format_exc()
+        }
+
+def display_chat_history():
+    """Display chat history"""
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.write(message["content"])
+
+            if message["role"] == "assistant" and "sql_query" in message:
+                with st.expander("Generated SQL Query"):
+                    st.code(message["sql_query"], language="sql")
+
+
+def main():
+    pass
 
