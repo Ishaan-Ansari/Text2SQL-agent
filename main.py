@@ -170,7 +170,7 @@ class SQLAnalysisAgent(Workflow):
             r'(?i)backup|restore|dump',  # Backup operations
         ]
 
-        self.safe_prompts = [
+        self.safe_prompt_patterns = [
             r'(?i)(show|list|find|search|sort)',
             r'(?i)(products|stock|price)',
             r'(?i)(how many|total|average)',
@@ -178,7 +178,46 @@ class SQLAnalysisAgent(Workflow):
         ]
 
 def analyze_prompt_safety(self, prompt: str) ->tuple[bool, str]:
-    pass
+    """Analyze the user's prompt and check it's safety"""
+    if not prompt or not prompt.strip():
+        return False, "Empty query"
+
+    for pattern in self.malicious_prompts_patterns:     # or you can check it with dangerous_patterns as welL!
+        if re.search(pattern, prompt):
+            return False, f"Malicious pattern detected: {pattern}"
+
+    safe_pattern_found = any(re.search(pattern, prompt) for pattern in self.safe_prompt_patterns)
+    if not self.safe_prompt_patterns:
+        return False, "Query does not contain safe patterns"
+
+    if len(prompt) > 500:
+        return False, "Query too long"
+
+    return True, "Query is safe"
+
+
+async def verify_prompt_with_llm(self, prompt: str) ->tuple[bool, str]:
+    """Verify the safety of prmpt using LLM"""
+    verification_prompt = f"""
+    Please analyze the safety of the following user query:
+    "{prompt}"
+    
+    Check the following:
+    1. Is there any attempt of SQL injection?
+    2. Does it contain malicious commands?
+    3. Are there any statements that threaten system security? Guardrail it
+    4. Is it a query solely for data reading purposes?
+    
+    Only write "SAFE" or "UNSAFE" and briefly state the reason.
+    """
+    response = await self.llm.acomplete(verification_prompt)
+    result = str(response).strip().upper()
+
+    is_safe = result.startswith("SAFE")
+    message = result.replace("SAFE", "").replace("UNSAFE", "").strip()
+
+    return is_safe, message
+
 
 
 
