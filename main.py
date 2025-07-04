@@ -1,9 +1,12 @@
+import logging
 import traceback
 from typing import Optional, List, Tuple, Dict, Any
 from contextlib import contextmanager
 import streamlit as st
 import os
+from pathlib import Path
 import sqlite3
+import datetime
 import re
 from print_manager import PrintManager
 pm = PrintManager()
@@ -97,5 +100,85 @@ async def analyze_intent(self, prompt: str)->tuple[str, str]:
 async def determine_intent(self, ev: StartEvent) -> StopEvent:
     prompt = ev.topic
     intent, message = await self.analyze_intent(prompt)
+
+class SQLAnalysisAgent(Workflow):
+    def __init__(self):
+        super().__init__()
+        self.llm = OpenAI()
+        Settings.llm = self.llm
+
+        # logging settings
+        log_file = f"logs/sql_agent{datetime.now().strftime("%Y%m%d")}.log"
+        os.makedirs('logs', exist_ok=True)
+        logging.basicConfig(
+            filename=log_file,
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
+
+        # SQLite connection
+        db_path = Path('data/database.db')
+        if not db_path.parent.exists():
+            db_path.parent.mkdir(parents=True)
+        self.db_connection = sqlite3.connect(db_path, check_same_thread=True)
+        self.cursor = self.db_connection.cursor()
+
+        # safe SQL patterns
+        self.safe_patterns = {
+            'SELECT': r'^SELECT\s+(?:(?:[\w\s,.()*]|\s)+)\s+FROM\s+[\w]+(?:\s+WHERE\s+[\w\s><=]+)?(?:\s+ORDER\s+BY\s+[\w\s,]+)?(?:\s+LIMIT\s+\d+)?$',
+            'COUNT': r'^SELECT\s+COUNT\s*\(\s*\*\s*\)\s+FROM\s+[\w]+(?:\s+WHERE\s+[\w\s><=]+)?$',
+            'AVG': r'^SELECT\s+AVG\s*\(\s*[\w]+\s*\)\s+FROM\s+[\w]+(?:\s+WHERE\s+[\w\s><=]+)?$'
+        }
+
+        # unsafe characters and patterns
+        self.dangerous = {
+            r';.*',  # Multiple queries
+            r'--.*',  # SQL comments
+            r'/\*.*?\*/',  # Multiline comments
+            r'xp_.*',  # System stored procedures
+            r'exec.*',  # Execute commands
+            r'UNION.*',  # UNION attacks
+            r'DROP.*',  # DROP commands
+            r'DELETE.*',  # DELETE commands
+            r'UPDATE.*',  # UPDATE commands
+            r'ALTER.*',  # ALTER commands
+            r'TRUNCATE.*',  # TRUNCATE commands
+            r'INSERT.*',  # INSERT commands
+            r'GRANT.*',  # GRANT commands
+            r'REVOKE.*',  # REVOKE commands
+            r'SYSTEM.*',  # System commands
+            r'INTO\s+(?:OUTFILE|DUMPFILE).*',  # File operations
+        }
+
+        # Allowed tables and columns
+        self.allowed_tables = {"product"}
+        self.allowed_columns = {
+            'products': {'id', 'name', 'price', 'stock'}
+        }
+
+        # Malicious prompts patterns
+        self.malicious_prompts_patterns = [
+            r'(?i)(drop|delete|truncate|alter)\s+table',  # Dropping/modifying tables
+            r'(?i)system\s+command',  # System commands
+            r'(?i)(hack|exploit|attack)',  # Malicious words
+            r'(?i)(union\s+select|join\s+select)',  # SQL injection
+            r'(?i)(--|;|/\*|\*/)',  # SQL comments and separators
+            r'(?i)(xp_cmdshell|exec\s+sp)',  # Stored procedures
+            r'(?i)(insert\s+into|update\s+set)',  # Data modification
+            r'(?i)password|username|credential',  # Sensitive data
+            r'(?i)grant|revoke|permission',  # Permission changes
+            r'(?i)backup|restore|dump',  # Backup operations
+        ]
+
+        self.safe_prompts = [
+            r'(?i)(show|list|find|search|sort)',
+            r'(?i)(products|stock|price)',
+            r'(?i)(how many|total|average)',
+            r'(?i)(highest|lowest|maximum|minimum)',
+        ]
+
+def analyze_prompt_safety(self, prompt: str) ->tuple[bool, str]:
+    pass
+
 
 
