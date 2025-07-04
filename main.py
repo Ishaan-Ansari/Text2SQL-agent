@@ -9,6 +9,7 @@ import sqlite3
 import datetime
 import re
 from print_manager import PrintManager
+
 pm = PrintManager()
 
 from llama_index.core.response.pprint_utils import pprint_response
@@ -17,16 +18,18 @@ from llama_index.core import Settings
 from llama_index.core.utilities.sql_wrapper import SQLDatabase
 from llama_index.core.query_engine import NLSQLTableQueryEngine
 from llama_index.core.workflow import (
-    Event,
-    StartEvent,
+    Event,  # Base class for all events
+    StartEvent,  # signals start of the workflow
     StopEvent,
     Workflow,
-    step,
+    step,  # Decorator used to register methods as workflow steps
 )
 
 from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
+
 load_dotenv()
+
 
 class IntentAnalysisEvent(Event):
     intent: str
@@ -50,7 +53,7 @@ class FeedbackEvent(Event):
 
 class IntentAnalyzer(Workflow):
     def __init__(self):
-        super().__init__()
+        super().__init__()  # Initialize the base Workflow machinery, [Let's u call the base class without naming it!]
         self.llm = OpenAI()
         Settings.llm = self.llm
 
@@ -70,7 +73,8 @@ class IntentAnalyzer(Workflow):
             r'(?i)(thank you|thanks)',
         ]
 
-async def analyze_intent(self, prompt: str)->tuple[str, str]:
+
+async def analyze_intent(self, prompt: str) -> tuple[str, str]:
     """Analyze the purpose of the user's prompt"""
     if any(re.search(pattern, prompt) for pattern in self.sql_patterns):
         return "sql", "SQL query detected"
@@ -96,19 +100,21 @@ async def analyze_intent(self, prompt: str)->tuple[str, str]:
         return "sql", "LLM analysis, SQL query detected"
     return "chat", "LLM analysis: chat intent detected"
 
+
 @step
 async def determine_intent(self, ev: StartEvent) -> StopEvent:
     prompt = ev.topic
     intent, message = await self.analyze_intent(prompt)
 
-class SQLAnalysisAgent(Workflow):
+
+class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows provide plus my own addition
     def __init__(self):
         super().__init__()
         self.llm = OpenAI()
         Settings.llm = self.llm
 
         # logging settings
-        log_file = f"logs/sql_agent{datetime.now().strftime("%Y%m%d")}.log"
+        log_file = f"logs/sql_agent{datetime.now().strftime('%Y%m%d')}.log"
         os.makedirs('logs', exist_ok=True)
         logging.basicConfig(
             filename=log_file,
@@ -177,12 +183,13 @@ class SQLAnalysisAgent(Workflow):
             r'(?i)(highest|lowest|maximum|minimum)',
         ]
 
-def analyze_prompt_safety(self, prompt: str) ->tuple[bool, str]:
+
+def analyze_prompt_safety(self, prompt: str) -> tuple[bool, str]:
     """Analyze the user's prompt and check it's safety"""
     if not prompt or not prompt.strip():
         return False, "Empty query"
 
-    for pattern in self.malicious_prompts_patterns:     # or you can check it with dangerous_patterns as welL!
+    for pattern in self.malicious_prompts_patterns:  # or you can check it with dangerous_patterns as welL!
         if re.search(pattern, prompt):
             return False, f"Malicious pattern detected: {pattern}"
 
@@ -196,7 +203,7 @@ def analyze_prompt_safety(self, prompt: str) ->tuple[bool, str]:
     return True, "Query is safe"
 
 
-async def verify_prompt_with_llm(self, prompt: str) ->tuple[bool, str]:
+async def verify_prompt_with_llm(self, prompt: str) -> tuple[bool, str]:
     """Verify the safety of prmpt using LLM"""
     verification_prompt = f"""
     Please analyze the safety of the following user query:
@@ -218,12 +225,9 @@ async def verify_prompt_with_llm(self, prompt: str) ->tuple[bool, str]:
 
     return is_safe, message
 
-def sanitize_input(self, value: str)->str:
+
+def sanitize_input(self, value: str) -> str:
     """Sanitize input against SQL injection"""
     if value is None:
         return None
     return value.replace("'", "''").replace(";", "").replace("--", "")
-
-
-
-
