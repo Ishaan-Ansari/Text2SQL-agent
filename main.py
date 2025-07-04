@@ -218,6 +218,12 @@ async def verify_prompt_with_llm(self, prompt: str) ->tuple[bool, str]:
 
     return is_safe, message
 
+def sanitize_input(self, value: str)->str:
+    """Sanitize input against SQL injection"""
+    if value is None:
+        return None
+    return value.replace("'", "''").replace(";", "").replace("--", "")
+
 
 
 
