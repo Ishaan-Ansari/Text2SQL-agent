@@ -381,8 +381,42 @@ async def generate_sql(self, ev: StartEvent) -> SQLGenerationEvent:
 
         return SQLGenerationEvent(sql_query=sql_query)
 
+@step
+async def execute_sql(self, ev:StartEvent) ->SQLExecutionEvent:
+    pass
+
+def create_feedback_prompt(self, ev:SQLExecutionEvent) ->str:
+    """Create a feedback prompt for the LLM"""
+    pass
+
+async def collect_feedback(self, ev: SQLExecutionEvent) -> StopEvent:
+    pass
 
 
+def __del__(self):
+    """Cleanup operations"""
+    try:
+        if hasattr(self, 'cursor'):
+            self.cursor.close()
+        if hasattr(self, 'db_connection'):
+            self.db_connection.close()
+    except Exception as e:
+        logging.error(f"Cleanup error: {str(e)}")
 
+async def run_sql_agent(natral_query: str) ->str:
+    """Run the SQL analysis agent"""
+    intent_analyzer = IntentAnalyzer()
+    result_dict = await intent_analyzer.run(topic=natral_query) ## directly det the dictionary
 
+    if result_dict["intent"] == "chat":
+        pm.warning("I can only help with database")
+        return "Please ask question relevant to a Db query"
+
+    # If it's an SQL query with a normal flow
+    agent = SQLAnalysisAgent()
+    result =  await agent.run(topic=natral_query)
+    return str(result)
+
+# natural_query = "Give me the price of the most expensive product"
+# result = await run_sql_agent(natural_query)
 
