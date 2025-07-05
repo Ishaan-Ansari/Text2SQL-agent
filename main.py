@@ -256,3 +256,21 @@ def validate_sql_safety(self, sql_query: str)-> tuple[bool, str]:
             return True, "Safe query"
 
     return False, "Unsuitable query format"
+
+def format_results(self, results, description):
+    """Format query results"""
+    if not results:
+        return "No results found"
+
+    column_names = [desc[0] for desc in description]
+    formatted_results = "\nQuery Results:\n"
+    formatted_results += "-"*80 + "\n"
+    formatted_results += " | ".join(f"{col:15}" for col in column_names) + "\n"
+    formatted_results += "-"*80 + "\n"
+
+    for row in results:
+        formatted_results += " | ".join(f"{str(item):15}" for item in row) + "\n"
+    formatted_results += "-"*80 + "\n"
+
+    return formatted_results
+
