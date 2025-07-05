@@ -231,3 +231,28 @@ def sanitize_input(self, value: str) -> str:
     if value is None:
         return None
     return value.replace("'", "''").replace(";", "").replace("--", "")
+
+def validate_sql_safety(self, sql_query: str)-> tuple[bool, str]:
+    """Check the safety of SQL query"""
+    if not sql_query or sql_query.strip():
+        return False, "Empty query"
+
+    sql_query = sql_query.upper()
+
+    if not sql_query.strip().startswith('SELECT'):
+        return False, "Only SELECT queries are allowed"
+
+    for pattern in self.dangerous_patterns:
+        if re.search(pattern, sql_query, re.IGNORECASE):
+            return False, f"Dangerous pattern detected: {pattern}"
+
+    tables = re.findall(r'FROM\s+(\w+)', sql_query, re.IGNORECASE)
+    for table in tables:
+        if table.lower() not in self.allowed_tables:
+            return False, f"Accessing unauthorized table: {table}"
+
+    for pattern in self.safe_patterns.values:
+        if re.match(pattern, sql_query, re.IGNORECASE):
+            return True, "Safe query"
+
+    return False, "Unsuitable query format"
