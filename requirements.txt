@@ -1,9 +1,8 @@
-python-dotenv~=1.0.1
+python-dotenv
 openai
 llama-index
-streamlit~=1.20.0
+streamlit
 nltk
-sqlalchemy~=2.0.36
+sqlalchemy
 psycopg2
-
-colorama~=0.4.6
+colorama
