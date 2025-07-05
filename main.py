@@ -232,7 +232,8 @@ def sanitize_input(self, value: str) -> str:
         return None
     return value.replace("'", "''").replace(";", "").replace("--", "")
 
-def validate_sql_safety(self, sql_query: str)-> tuple[bool, str]:
+
+def validate_sql_safety(self, sql_query: str) -> tuple[bool, str]:
     """Check the safety of SQL query"""
     if not sql_query or sql_query.strip():
         return False, "Empty query"
@@ -257,6 +258,7 @@ def validate_sql_safety(self, sql_query: str)-> tuple[bool, str]:
 
     return False, "Unsuitable query format"
 
+
 def format_results(self, results, description):
     """Format query results"""
     if not results:
@@ -264,17 +266,18 @@ def format_results(self, results, description):
 
     column_names = [desc[0] for desc in description]
     formatted_results = "\nQuery Results:\n"
-    formatted_results += "-"*80 + "\n"
+    formatted_results += "-" * 80 + "\n"
     formatted_results += " | ".join(f"{col:15}" for col in column_names) + "\n"
-    formatted_results += "-"*80 + "\n"
+    formatted_results += "-" * 80 + "\n"
 
     for row in results:
         formatted_results += " | ".join(f"{str(item):15}" for item in row) + "\n"
-    formatted_results += "-"*80 + "\n"
+    formatted_results += "-" * 80 + "\n"
 
     return formatted_results
 
-def learn_from_history(self, natural_query:str) ->str:
+
+def learn_from_history(self, natural_query: str) -> str:
     """Learn from past queries"""
     self.cursor.execute("""
             SELECT natural_query, generated_sql, execution_result 
@@ -290,6 +293,96 @@ def learn_from_history(self, natural_query:str) ->str:
         pm.info(f"\nSimilar successful query found: \n{similar_query}")
         return similar_query[1]
     return None
+
+
+def log_error(self, error_msg: str, query: str):
+    """Log security breaches and errors"""
+    logging.error(f"Security breach - Query: {query}\n Error: {error_msg}")
+    try:
+        self.cursor.execute("""
+            INSERT INTO error_stats (error_type, query, message)
+            VALUES (?, ?, ?)
+        """, ('SECURITY_VIOLATION', query, error_msg))
+        self.db_connection.commit()
+    except Exception as e:
+        logging.error(f"Log entry error: {str(e)}")
+
+
+@step
+async def generate_sql(self, ev: StartEvent) -> SQLGenerationEvent:
+    pm.section_header("SQL Query generartion")
+    prompt = ev.topic
+
+    # Security checks
+    pm.subsection("Securit Analysis")
+    is_safe, message = self.analyze_prompt_safety(prompt)
+
+    if not is_safe:
+        pm.security(f"Prompt is not safe {message}", False)
+        return SQLGenerationEvent(sql_query = "SELECT 'Faled security check' as message")
+
+    pm.security("Security checks passed", True)
+
+    # Generate SQL
+    pm.subsection('SQL generation')
+    query = self.sanitze_input(prompt)
+
+    # Get schema info.
+    self.cursor.execute("SELECT table_name, column_info FROM tables_info")
+    schema_info = self.cursor.fetchall()
+
+    # Learn from history
+    learned_sql = self.learn_from_history(query)
+    if learned_sql:
+        pm.info(f"SQL learned from history: {learned_sql}")
+        is_safe, message = self.validate_sql_safety(learned_sql)
+        if not is_safe:
+            learned_sql = None
+            pm.warning(f"learning query is not safe: {message}")
+
+        # Generate SQL with LLM
+        sql_prompt = f"""
+        Database schema:
+        {schema_info}
+
+        Please translate the following natural language query into an SQL query:
+        {query}
+
+        IMPORTANT RULES:
+        1. Only SELECT queries are allowed
+        2. Only access the 'products' table
+        3. Allowed columns: id, name, price, stock
+        4. No multiple queries, comments, or special characters
+        5. No complex queries like UNION, JOIN
+
+        Only return the SQL query.
+        """
+
+        response = await self.llm.acomplete(sql_prompt)
+        sql_query = str(response).strip().replace('```sql', '').replace('```', '').strip()
+
+        # validate SQL query
+        is_safe, message = self.validate_sql_safety(sql_query)
+
+        if not is_safe:
+            pm.security(f"Generated SQL is not safe: {message}", False)
+            return SQLGenerationEvent(sql_query="SELECT 'Security breach detected' as message")
+
+        pm.success("SQL query generated successfully")
+        pm.info(f"Original Query: {query}")
+        pm.info(f"Generated SQL: {sql_query}")
+
+        # Save SQL query
+        self.cursor.execute(
+            "INSERT INTO query_history (natural_query, generated_sql) VALUES (?, ?)",
+            (query, sql_query)
+        )
+        self.db_connection.commit()
+
+        return SQLGenerationEvent(sql_query=sql_query)
+
+
+
 
 
 
