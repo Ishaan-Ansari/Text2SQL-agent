@@ -274,3 +274,22 @@ def format_results(self, results, description):
 
     return formatted_results
 
+def learn_from_history(self, natural_query:str) ->str:
+    """Learn from past queries"""
+    self.cursor.execute("""
+            SELECT natural_query, generated_sql, execution_result 
+            FROM query_history 
+            WHERE natural_query LIKE ? 
+            AND execution_result NOT LIKE '%error%'
+            ORDER BY created_at DESC 
+            LIMIT 1
+    """, (f"%{natural_query}%"))
+
+    similar_query = self.cursor.fetchone()
+    if similar_query:
+        pm.info(f"\nSimilar successful query found: \n{similar_query}")
+        return similar_query[1]
+    return None
+
+
+
