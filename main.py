@@ -77,6 +77,8 @@ class IntentAnalyzer(Workflow):
 
     async def analyze_intent(self, prompt: str) -> tuple[str, str]:
         """Analyze the purpose of the user's prompt"""
+        if not prompt or not prompt.strip():
+            return "chat", "Empty prompt detected"
         if any(re.search(pattern, prompt) for pattern in self.sql_patterns):
             return "sql", "SQL query detected"
         if any(re.search(pattern, prompt) for pattern in self.chat_patterns):
@@ -90,8 +92,13 @@ class IntentAnalyzer(Workflow):
         There are only two options:
         1. SQL: The user wants to perform a database query
         2. CHAT: The user wants to chat
+                
+        Consider these factors:
+        - Does it mention products, prices, stock, or database operations?
+        - Is it asking for data retrieval or analysis?
+        - Is it a greeting or general conversation?
         
-        Only write "SQL" or "CHAT".
+        Respond only with "SQL" or "CHAT".
         """
 
         response = await self.llm.acomplete(analysis_prompt)
@@ -111,7 +118,7 @@ class IntentAnalyzer(Workflow):
 class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows provide plus my own addition
     def __init__(self):
         super().__init__()
-        self.llm = OpenAI()
+        self.llm = OpenAI(timeout=150.0)
         Settings.llm = self.llm
 
         # logging settings
@@ -134,11 +141,14 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
         self.safe_patterns = {
             'SELECT': r'^SELECT\s+(?:(?:[\w\s,.()*]|\s)+)\s+FROM\s+[\w]+(?:\s+WHERE\s+[\w\s><=]+)?(?:\s+ORDER\s+BY\s+[\w\s,]+)?(?:\s+LIMIT\s+\d+)?$',
             'COUNT': r'^SELECT\s+COUNT\s*\(\s*\*\s*\)\s+FROM\s+[\w]+(?:\s+WHERE\s+[\w\s><=]+)?$',
-            'AVG': r'^SELECT\s+AVG\s*\(\s*[\w]+\s*\)\s+FROM\s+[\w]+(?:\s+WHERE\s+[\w\s><=]+)?$'
+            'AVG': r'^SELECT\s+AVG\s*\(\s*[\w]+\s*\)\s+FROM\s+[\w]+(?:\s+WHERE\s+[\w\s><=]+)?$',
+            'MAX': r'^SELECT\s+MAX\s*\(\s*[\w]+\s*\)\s+FROM\s+[\w]+(?:\s+WHERE\s+[\w\s><=\'\"]+)?$',
+            'MIN': r'^SELECT\s+MIN\s*\(\s*[\w]+\s*\)\s+FROM\s+[\w]+(?:\s+WHERE\s+[\w\s><=\'\"]+)?$',
+            'SUM': r'^SELECT\s+SUM\s*\(\s*[\w]+\s*\)\s+FROM\s+[\w]+(?:\s+WHERE\s+[\w\s><=\'\"]+)?$',
         }
 
         # unsafe characters and patterns
-        self.dangerous = {
+        self.dangerous_patterns  = {
             r';.*',  # Multiple queries
             r'--.*',  # SQL comments
             r'/\*.*?\*/',  # Multiline comments
@@ -452,7 +462,7 @@ async def run_sql_agent(natural_query: str) -> str:
 
     # If it's an SQL query with a normal flow
     agent = SQLAnalysisAgent()
-    result = await agent.run(topic=natural_query)
+    result = await agent.run(topic=natural_query, timeout=150)
     return str(result)
 
 
