@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 import datetime
 import re
+import time
 from print_manager import PrintManager
 
 pm = PrintManager()
@@ -114,7 +115,7 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
         Settings.llm = self.llm
 
         # logging settings
-        log_file = f"logs/sql_agent{datetime.now().strftime('%Y%m%d')}.log"
+        log_file = f"logs/sql_agent{datetime.datetime().now().strftime('%Y%m%d')}.log"
         os.makedirs('logs', exist_ok=True)
         logging.basicConfig(
             filename=log_file,
@@ -290,7 +291,7 @@ def learn_from_history(self, natural_query: str) -> str:
 
     similar_query = self.cursor.fetchone()
     if similar_query:
-        pm.info(f"\nSimilar successful query found: \n{similar_query}")
+        pm.info(f"\nSimilar query found: \n{similar_query}")
         return similar_query[1]
     return None
 
@@ -382,17 +383,70 @@ async def generate_sql(self, ev: StartEvent) -> SQLGenerationEvent:
         return SQLGenerationEvent(sql_query=sql_query)
 
 @step
-async def execute_sql(self, ev:StartEvent) ->SQLExecutionEvent:
-    pass
+async def execute_sql(self, ev:SQLExecutionEvent) ->SQLExecutionEvent:
+    sql_query = ev.sql_query
+    try:
+        # Query plan
+        self.cursor.execute(sql_query)
+        query_plan = self.cursor.fetchall()
+        for step in query_plan:
+            print(f"Plan step: {step}")
+
+        # Execute query
+        start_time = time.time()
+        self.cursor.execute(sql_query)
+        result = self.cursor.fetchall()
+        execution_time = time.time()-start_time
+
+        # format results
+        formatted_results = self.format_results(result, self.cursor.description)
+        print(formatted_results)
+
+        # performance metrics
+        metrics = {
+
+        }
+
+        return SQLExecutionEvent(
+            execution_result=formatted_results,
+            execution_time=execution_time,
+            row_count=len(result)
+        )
+
+    except Exception as e:
+        error_message = f"Error in executing SQL query: {str(e)}"
+        self.log_error(str(e), error_message)
+        return SQLExecutionEvent(
+            execution_result=error_message,
+            execution_time=0,
+            row_count=0
+        )
+
 
 def create_feedback_prompt(self, ev:SQLExecutionEvent) ->str:
     """Create a feedback prompt for the LLM"""
-    pass
+    return f"""
+    Please briefly evaluate the result of this query:
+    
+    Query Metrics:
+    - Execution Time: {ev.execution_time:.4f} seconds
+    - Rows Returned: {ev.row_count}
+    
+    Query Result:
+    {ev.execution_result}
+    
+    Please provide a SHORT and CLEAR evaluation based on the following criteria:
+    1. Was the query successful? (Yes/No)
+    2. Is the performance adequate? (Yes/No)
+    3. If any, what are the improvement suggestions?
+    """
 
+@step
 async def collect_feedback(self, ev: SQLExecutionEvent) -> StopEvent:
-    pass
+    feedback =
 
 
+# 'destructor' - clean up external resources, closing db, and connection
 def __del__(self):
     """Cleanup operations"""
     try:
