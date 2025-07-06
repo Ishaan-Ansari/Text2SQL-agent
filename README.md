@@ -28,7 +28,7 @@ This project provides a system that analyzes natural language queries and conver
    python create_sqllite.py
    ```
 
-4. Start using the agent with main.ipynb  
+4. Start using the agent with `streamlit run app.py`
 
 ## Usage
 
