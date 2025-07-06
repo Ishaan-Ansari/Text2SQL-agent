@@ -75,7 +75,6 @@ class IntentAnalyzer(Workflow):
             r'(?i)(thank you|thanks)',
         ]
 
-
     async def analyze_intent(self, prompt: str) -> tuple[str, str]:
         """Analyze the purpose of the user's prompt"""
         if any(re.search(pattern, prompt) for pattern in self.sql_patterns):
@@ -102,12 +101,11 @@ class IntentAnalyzer(Workflow):
             return "sql", "LLM analysis, SQL query detected"
         return "chat", "LLM analysis: chat intent detected"
 
-
     @step
     async def determine_intent(self, ev: StartEvent) -> StopEvent:
         prompt = ev.topic
         intent, message = await self.analyze_intent(prompt)
-        return StopEvent(result={'intent':intent, "message":message})
+        return StopEvent(result={'intent': intent, "message": message})
 
 
 class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows provide plus my own addition
@@ -117,7 +115,7 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
         Settings.llm = self.llm
 
         # logging settings
-        log_file = f"logs/sql_agent{datetime.datetime().now().strftime('%Y%m%d')}.log"
+        log_file = f"logs/sql_agent{datetime.datetime.now().strftime('%Y%m%d')}.log"
         os.makedirs('logs', exist_ok=True)
         logging.basicConfig(
             filename=log_file,
@@ -129,7 +127,7 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
         db_path = Path('data/database.db')
         if not db_path.parent.exists():
             db_path.parent.mkdir(parents=True)
-        self.db_connection = sqlite3.connect(db_path, check_same_thread=False) # False for multi-threading support
+        self.db_connection = sqlite3.connect(db_path, check_same_thread=False)  # False for multi-threading support
         self.cursor = self.db_connection.cursor()
 
         # safe SQL patterns
@@ -186,7 +184,6 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
             r'(?i)(highest|lowest|maximum|minimum)',
         ]
 
-
     def analyze_prompt_safety(self, prompt: str) -> tuple[bool, str]:
         """Analyze the user's prompt and check it's safety"""
         if not prompt or not prompt.strip():
@@ -204,7 +201,6 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
             return False, "Query too long"
 
         return True, "Query is safe"
-
 
     async def verify_prompt_with_llm(self, prompt: str) -> tuple[bool, str]:
         """Verify the safety of prompt using LLM"""
@@ -228,13 +224,11 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
 
         return is_safe, message
 
-
     def sanitize_input(self, value: str) -> str:
         """Sanitize input against SQL injection"""
         if value is None:
             return None
         return value.replace("'", "''").replace(";", "").replace("--", "")
-
 
     def validate_sql_safety(self, sql_query: str) -> tuple[bool, str]:
         """Check the safety of SQL query"""
@@ -261,7 +255,6 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
 
         return False, "Unsuitable query format"
 
-
     def format_results(self, results, description):
         """Format query results"""
         if not results:
@@ -279,7 +272,6 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
 
         return formatted_results
 
-
     def learn_from_history(self, natural_query: str) -> str:
         """Learn from past queries"""
         self.cursor.execute("""
@@ -289,14 +281,13 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
                 AND execution_result NOT LIKE '%error%'
                 ORDER BY created_at DESC 
                 LIMIT 1
-        """, f"%{natural_query}%")
+        """, (f"%{natural_query}%",))
 
         similar_query = self.cursor.fetchone()
         if similar_query:
             pm.info(f"\nSimilar query found: \n{similar_query}")
             return similar_query[1]
         return None
-
 
     def log_error(self, error_msg: str, query: str):
         """Log security breaches and errors"""
@@ -310,7 +301,6 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
         except Exception as e:
             logging.error(f"Log entry error: {str(e)}")
 
-
     @step
     async def generate_sql(self, ev: StartEvent) -> SQLGenerationEvent:
         prompt = ev.topic
@@ -320,7 +310,7 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
 
         if not is_safe:
             pm.security(f"Prompt is not safe {message}", False)
-            return SQLGenerationEvent(sql_query = "SELECT 'Failed security check' as message")
+            return SQLGenerationEvent(sql_query="SELECT 'Failed security check' as message")
 
         pm.security("Security checks passed", True)
 
@@ -329,11 +319,12 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
         query = self.sanitize_input(prompt)
 
         # Get schema info.
-        self.cursor.execute("SELECT table_name, column_info FROM tables_info")
+        self.cursor.execute("SELECT table_name, columns_info FROM tables_info")
         schema_info = self.cursor.fetchall()
 
         # Learn from history
         learned_sql = self.learn_from_history(query)
+
         if learned_sql:
             pm.info(f"SQL learned from history: {learned_sql}")
             is_safe, message = self.validate_sql_safety(learned_sql)
@@ -385,14 +376,14 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
             return SQLGenerationEvent(sql_query=sql_query)
 
     @step
-    async def execute_sql(self, ev:SQLGenerationEvent) ->SQLExecutionEvent:
+    async def execute_sql(self, ev: SQLGenerationEvent) -> SQLExecutionEvent:
         sql_query = ev.sql_query
         try:
             # Execute query
             start_time = time.time()
             self.cursor.execute(sql_query)
             result = self.cursor.fetchall()
-            execution_time = time.time()-start_time
+            execution_time = time.time() - start_time
 
             # format results
             formatted_results = self.format_results(result, self.cursor.description)
@@ -413,8 +404,7 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
                 row_count=0
             )
 
-
-    def create_feedback_prompt(self, ev:SQLExecutionEvent) ->str:
+    def create_feedback_prompt(self, ev: SQLExecutionEvent) -> str:
         """Create a feedback prompt for the LLM"""
         return f"""
         Please briefly evaluate the result of this query:
@@ -439,7 +429,6 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
         print(str(feedback))
         return StopEvent(result=str(ev.execution_result))
 
-
     # 'destructor' - clean up external resources, closing db, and connection
     def __del__(self):
         """Cleanup operations"""
@@ -451,10 +440,11 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
         except Exception as e:
             logging.error(f"Cleanup error: {str(e)}")
 
-async def run_sql_agent(natural_query: str) ->str:
+
+async def run_sql_agent(natural_query: str) -> str:
     """Run the SQL analysis agent"""
     intent_analyzer = IntentAnalyzer()
-    result_dict = await intent_analyzer.run(topic=natural_query) ## directly det the dictionary
+    result_dict = await intent_analyzer.run(topic=natural_query)  ## directly det the dictionary
 
     if result_dict["intent"] == "chat":
         pm.warning("I can only help with database")
@@ -465,11 +455,12 @@ async def run_sql_agent(natural_query: str) ->str:
     result = await agent.run(topic=natural_query)
     return str(result)
 
+
 async def main():
     natural_query = "Give me the price of the most expensive product"
     result = await run_sql_agent(natural_query)
     print(result)
 
+
 if __name__ == '__main__':
     asyncio.run(main())
-
