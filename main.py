@@ -168,7 +168,7 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
         }
 
         # Allowed tables and columns
-        self.allowed_tables = {"product"}
+        self.allowed_tables = {"products"}
         self.allowed_columns = {
             'products': {'id', 'name', 'price', 'stock'}
         }
@@ -340,50 +340,48 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
             is_safe, message = self.validate_sql_safety(learned_sql)
             if is_safe:
                 return SQLGenerationEvent(sql_query=learned_sql)
-            else:
-                # learned_sql = None
-                pm.warning(f"learning query is not safe: {message}")
 
-            # Generate SQL with LLM
-            sql_prompt = f"""
-            Database schema:
-            {schema_info}
-    
-            Please translate the following natural language query into an SQL query:
-            {query}
-    
-            IMPORTANT RULES:
-            1. Only SELECT queries are allowed
-            2. Only access the 'products' table
-            3. Allowed columns: id, name, price, stock
-            4. No multiple queries, comments, or special characters
-            5. No complex queries like UNION, JOIN
-    
-            Only return the SQL query.
-            """
+        # Generate SQL with LLM
+        sql_prompt = f"""
+        Database schema:
+        {schema_info}
 
-            response = await self.llm.acomplete(sql_prompt)
-            sql_query = str(response).strip().replace('```sql', '').replace('```', '').strip()
+        Please translate the following natural language query into an SQL query:
+        {query}
 
-            # validate SQL query
-            is_safe, message = self.validate_sql_safety(sql_query)
+        IMPORTANT RULES:
+        1. Only SELECT queries are allowed
+        2. Only access the 'products' table
+        3. Allowed columns: id, name, price, stock
+        4. No multiple queries, comments, or special characters
+        5. No complex queries like UNION, JOIN
 
-            if not is_safe:
-                pm.security(f"Generated SQL is not safe: {message}", False)
-                return SQLGenerationEvent(sql_query="SELECT 'Security breach detected' as message")
+        Only return the SQL query.
+        """
 
-            pm.success("SQL query generated successfully")
-            pm.info(f"Original Query: {query}")
-            pm.info(f"Generated SQL: {sql_query}")
+        response = await self.llm.acomplete(sql_prompt)
+        sql_query = str(response).strip().replace('```sql', '').replace('```', '').strip()
+        sql_query = sql_query.rstrip(';')
 
-            # Save SQL query
-            self.cursor.execute(
-                "INSERT INTO query_history (natural_query, generated_sql) VALUES (?, ?)",
-                (query, sql_query)
-            )
-            self.db_connection.commit()
+        # validate SQL query
+        is_safe, message = self.validate_sql_safety(sql_query)
 
-            return SQLGenerationEvent(sql_query=sql_query)
+        if not is_safe:
+            pm.security(f"Generated SQL is not safe: {message}", False)
+            return SQLGenerationEvent(sql_query="SELECT 'Security breach detected' as message")
+
+        pm.success("SQL query generated successfully")
+        pm.info(f"Original Query: {query}")
+        pm.info(f"Generated SQL: {sql_query}")
+
+        # Save SQL query
+        self.cursor.execute(
+            "INSERT INTO query_history (natural_query, generated_sql) VALUES (?, ?)",
+            (query, sql_query)
+        )
+        self.db_connection.commit()
+
+        return SQLGenerationEvent(sql_query=sql_query)
 
     @step
     async def execute_sql(self, ev: SQLGenerationEvent) -> SQLExecutionEvent:
@@ -435,7 +433,7 @@ class SQLAnalysisAgent(Workflow):  # I want all the machinery that workflows pro
     @step
     async def collect_feedback(self, ev: SQLExecutionEvent) -> StopEvent:
         feedback_prompt = self.create_feedback_prompt(ev)
-        feedback = self.llm.acomplete(feedback_prompt)
+        feedback = await self.llm.acomplete(feedback_prompt)
         print(str(feedback))
         return StopEvent(result=str(ev.execution_result))
 
